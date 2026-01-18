@@ -1,0 +1,407 @@
+<!doctype html>
+<html lang="pt-BR" class="h-full">
+ <head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Controle Financeiro 2025</title>
+  <script src="/_sdk/data_sdk.js"></script>
+  <script src="/_sdk/element_sdk.js"></script>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    body {
+      box-sizing: border-box;
+    }
+    
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+    
+    .month-pill {
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      cursor: pointer;
+      border: 2px solid transparent;
+    }
+    
+    .month-pill:hover {
+      transform: translateY(-2px);
+    }
+    
+    .month-pill.active {
+      border-width: 2px;
+    }
+
+    .toast {
+      position: fixed;
+      bottom: 24px;
+      right: 24px;
+      padding: 16px 24px;
+      border-radius: 12px;
+      font-weight: 500;
+      z-index: 1000;
+      animation: slideUp 0.3s ease;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+    }
+
+    @keyframes slideUp {
+      from {
+        transform: translateY(100px);
+        opacity: 0;
+      }
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+
+    .section-divider {
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
+      margin: 32px 0;
+    }
+
+    .stat-card {
+      position: relative;
+      overflow: hidden;
+    }
+
+    .stat-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      opacity: 0.3;
+    }
+
+    .modal-overlay {
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: rgba(0, 0, 0, 0.8);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 1000;
+      animation: fadeIn 0.2s ease;
+    }
+
+    .modal-content {
+      background: #1a1a1a;
+      border-radius: 20px;
+      padding: 24px;
+      max-width: 500px;
+      width: 90%;
+      max-height: 85%;
+      overflow-y: auto;
+      animation: slideUp 0.3s ease;
+    }
+
+    @media (max-width: 600px) {
+      .modal-content {
+        padding: 20px;
+        width: 95%;
+        max-height: 90%;
+      }
+    }
+
+    .form-input, .form-select {
+      width: 100%;
+      padding: 12px 16px;
+      border-radius: 12px;
+      border: 1px solid rgba(255,255,255,0.1);
+      background: rgba(255,255,255,0.05);
+      color: #ffffff;
+      font-size: 15px;
+      transition: all 0.2s ease;
+      outline: none;
+    }
+
+    .form-input:focus, .form-select:focus {
+      border-color: #00d9a0;
+      background: rgba(255,255,255,0.08);
+    }
+
+    .btn {
+      padding: 12px 24px;
+      border-radius: 12px;
+      font-weight: 600;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      border: none;
+      font-size: 15px;
+    }
+
+    .btn:hover {
+      transform: translateY(-2px);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none;
+    }
+
+    .transaction-item {
+      transition: all 0.2s ease;
+    }
+
+    .transaction-item:hover {
+      background: rgba(255,255,255,0.02);
+    }
+  </style>
+ </head>
+ <body class="h-full">
+  <div id="app" class="w-full h-full overflow-auto"></div>
+  <script>
+    const defaultConfig = {
+      background_color: "#0f0f0f",
+      surface_color: "#1a1a1a",
+      text_color: "#ffffff",
+      income_color: "#00d9a0",
+      expense_color: "#ff6b6b",
+      font_family: "Inter",
+      font_size: 15,
+      app_title: "Controle Financeiro"
+    };
+
+    let transactions = [];
+    let recordCount = 0;
+    let selectedMonth = new Date().getMonth();
+    let selectedYear = new Date().getFullYear();
+    let showModal = false;
+    let editingTransaction = null;
+    const MAX_RECORDS = 999;
+    
+    const months = ['JAN', 'FEV', 'MAR', 'ABR', 'MAI', 'JUN', 'JUL', 'AGO', 'SET', 'OUT', 'NOV', 'DEZ'];
+    const monthsFull = ['Janeiro', 'Fevereiro', 'Março', 'Abril', 'Maio', 'Junho', 'Julho', 'Agosto', 'Setembro', 'Outubro', 'Novembro', 'Dezembro'];
+
+    // Função para mostrar toast
+    function showToast(message, type = 'success') {
+      const toast = document.createElement('div');
+      toast.className = 'toast';
+      toast.style.backgroundColor = type === 'success' ? defaultConfig.income_color : defaultConfig.expense_color;
+      toast.style.color = defaultConfig.background_color;
+      toast.textContent = message;
+      document.body.appendChild(toast);
+      
+      setTimeout(() => {
+        toast.style.animation = 'slideUp 0.3s ease reverse';
+        setTimeout(() => toast.remove(), 300);
+      }, 3000);
+    }
+
+    function parseCSV(text) {
+      const lines = text.split('\n').filter(line => line.trim());
+      const separator = lines[0].includes(';') ? ';' : ',';
+      
+      const headers = lines[0].split(separator).map(h => h.trim().replace(/^["']|["']$/g, ''));
+      const data = [];
+      
+      for (let i = 1; i < lines.length; i++) {
+        const line = lines[i];
+        if (!line.trim()) continue;
+        
+        const values = [];
+        let currentValue = '';
+        let insideQuotes = false;
+        
+        for (let j = 0; j < line.length; j++) {
+          const char = line[j];
+          if (char === '"') {
+            insideQuotes = !insideQuotes;
+          } else if (char === separator && !insideQuotes) {
+            values.push(currentValue.trim().replace(/^["']|["']$/g, ''));
+            currentValue = '';
+          } else {
+            currentValue += char;
+          }
+        }
+        values.push(currentValue.trim().replace(/^["']|["']$/g, ''));
+        
+        if (values.length === headers.length || values.length === headers.length - 1) {
+          const obj = {};
+          headers.forEach((header, index) => {
+            obj[header] = values[index] || '';
+          });
+          data.push(obj);
+        }
+      }
+      
+      return data;
+    }
+
+    async function importFromFile(file) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        
+        reader.onload = async (e) => {
+          try {
+            const text = e.target.result;
+            const data = parseCSV(text);
+            
+            if (data.length === 0) {
+              showToast('Arquivo vazio ou formato inválido', 'error');
+              resolve(0);
+              return;
+            }
+
+            let imported = 0;
+            let errors = 0;
+
+            // Processar Extrato Bancário
+            if (data[0].hasOwnProperty('Descricao')) {
+              for (const row of data) {
+                let dateParts = row.Data?.split('/');
+                if (!dateParts || dateParts.length !== 3) {
+                  errors++;
+                  continue;
+                }
+
+                const day = parseInt(dateParts[0]);
+                const month = parseInt(dateParts[1]) - 1;
+                const year = parseInt(dateParts[2]);
+
+                const transactionDate = new Date(year, month, day);
+
+                let valorStr = row.Valor || '';
+                const isNegative = valorStr.includes('-');
+                valorStr = valorStr.replace('R$', '').replace('-', '').replace(/\./g, '').replace(',', '.').trim();
+                const amount = parseFloat(valorStr);
+
+                if (isNaN(amount) || amount <= 0) {
+                  errors++;
+                  continue;
+                }
+
+                const type = isNegative ? 'expense' : 'income';
+                const description = row.Descricao || '';
+                let category = 'Outros';
+
+                if (type === 'income' && description.includes('PIX RECEBIDO')) {
+                  category = 'Pix Recebido';
+                } else if (type === 'expense' && description.includes('TRANSFERÊNCIA ENVIADA')) {
+                  category = 'Transferência Enviada';
+                }
+
+                const transaction = {
+                  id: `${Date.now()}_${Math.random()}_${imported}`,
+                  type: type,
+                  category: category,
+                  amount: amount,
+                  paymentMethod: 'Pix',
+                  description: description,
+                  month: months[transactionDate.getMonth()],
+                  year: transactionDate.getFullYear(),
+                  installments: 1,
+                  installmentNumber: 1,
+                  date: transactionDate.toISOString(),
+                  createdAt: new Date().toISOString()
+                };
+
+                const result = await window.dataSdk.create(transaction);
+                if (result.isOk) {
+                  imported++;
+                } else {
+                  errors++;
+                  break;
+                }
+              }
+            }
+            
+            // Processar Fatura de Cartão
+            else if (data[0].hasOwnProperty('Estabelecimento')) {
+              for (const row of data) {
+                let dateParts = row.Data?.split('/');
+                if (!dateParts || dateParts.length !== 3) {
+                  errors++;
+                  continue;
+                }
+
+                const day = parseInt(dateParts[0]);
+                const month = parseInt(dateParts[1]) - 1;
+                const year = parseInt(dateParts[2]);
+
+                const transactionDate = new Date(year, month, day);
+
+                let valorStr = row.Valor || '';
+                const isNegative = valorStr.includes('-');
+                valorStr = valorStr.replace('R$', '').replace('-', '').replace(/\./g, '').replace(',', '.').trim();
+                const amount = parseFloat(valorStr);
+
+                const type = isNegative ? 'income' : 'expense';
+                const parcelaInfo = row.Parcela || '-';
+                let installments = 1;
+                let installmentNumber = 1;
+
+                if (parcelaInfo !== '-' && parcelaInfo.includes('de')) {
+                  const match = parcelaInfo.match(/(\d+)\s*de\s*(\d+)/);
+                  if (match) {
+                    installmentNumber = parseInt(match[1]);
+                    installments = parseInt(match[2]);
+                  }
+                }
+
+                const estabelecimento = (row.Estabelecimento || '').toUpperCase();
+                let category = 'Outros';
+
+                if (estabelecimento.includes('SUPERMERCADO') || estabelecimento.includes('MERCADO')) {
+                  category = 'Alimentação';
+                } else if (estabelecimento.includes('POSTO') || estabelecimento.includes('GASOLINA')) {
+                  category = 'Gasolina';
+                }
+
+                const transaction = {
+                  id: `${Date.now()}_${Math.random()}_${imported}`,
+                  type: type,
+                  category: category,
+                  amount: amount,
+                  paymentMethod: 'Cartão',
+                  description: row.Estabelecimento || '',
+                  month: months[transactionDate.getMonth()],
+                  year: transactionDate.getFullYear(),
+                  installments: installments,
+                  installmentNumber: installmentNumber,
+                  date: transactionDate.toISOString(),
+                  createdAt: new Date().toISOString()
+                };
+
+                const result = await window.dataSdk.create(transaction);
+                if (result.isOk) {
+                  imported++;
+                } else {
+                  errors++;
+                  break;
+                }
+              }
+            }
+            
+            if (imported > 0) {
+              showToast(`✓ ${imported} transações importadas${errors > 0 ? ` (${errors} com erro)` : ''}`);
+            } else {
+              showToast('Nenhuma transação válida encontrada', 'error');
+            }
+            
+            resolve(imported);
+          } catch (error) {
+            showToast('Erro ao ler arquivo', 'error');
+            reject(error);
+          }
+        };
+
+        reader.onerror = () => {
+          showToast('Erro ao ler arquivo', 'error');
+          reject(reader.error);
+        };
+
+        reader.readAsText(file, 'UTF-8');
+      });
+    }
+  </script>
+ </body>
+</html>
